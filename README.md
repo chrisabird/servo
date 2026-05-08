@@ -61,6 +61,24 @@ mise run run
 
 Open [http://localhost:8080](http://localhost:8080). Navigate to **Scan** (↺ in the nav bar) to trigger your first scan.
 
+## Docker
+
+```yaml
+services:
+  servo:
+    image: ghcr.io/chrisabird/servo:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/app/data/db      # persistent metadata (EDN store)
+      - /path/to/your/models:/app/stl  # your STL/3MF/OBJ library
+    environment:
+      STL_ROOT: /app/stl
+      DB_DIR: /app/data/db
+```
+
+Replace `/path/to/your/models` with the absolute path to your models directory on the host. The `./data` directory will be created automatically for the application metadata.
+
 ## Development
 
 ```sh

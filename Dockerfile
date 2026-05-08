@@ -6,5 +6,8 @@ RUN apt-get update && \
 
 WORKDIR /app
 COPY target/servo.jar .
+
+VOLUME ["/app/data/db", "/app/stl"]
+
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "servo.jar"]
