@@ -11,8 +11,14 @@
 (defn- ensure-preview-dir! [folder-path]
   (.mkdirs (io/file folder-path ".servo-images")))
 
+(defn- f3d-args [output-path model-path]
+  (let [backend (System/getenv "F3D_RENDERING_BACKEND")]
+    (cond-> ["f3d"]
+      backend (conj "--rendering-backend" backend)
+      true    (concat ["--output" output-path model-path]))))
+
 (defn- render-preview! [model-path output-path]
-  (let [{:keys [exit err]} (shell/sh "f3d" "--rendering-backend" "osmesa" "--output" output-path model-path)]
+  (let [{:keys [exit err]} (apply shell/sh (f3d-args output-path model-path))]
     (if (zero? exit)
       output-path
       (do

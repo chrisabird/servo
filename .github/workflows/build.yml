@@ -37,6 +37,8 @@ jobs:
         run: npm ci && npm run css:build
 
       - name: Run tests
+        env:
+          F3D_RENDERING_BACKEND: osmesa
         run: clojure -M:test
 
       - name: Build uberjar

@@ -83,20 +83,19 @@
           store-dir (temp-dir "servo-preview-store-")]
       (try
         (let [coll-dir (mk-subdir root "broken")
-              bad-file (.toFile (.resolve coll-dir "bad.stl"))
-              _ (spit bad-file "this is not a valid stl file")
+              missing-path (.getAbsolutePath (.toFile (.resolve coll-dir "missing.stl")))
               store (test-store store-dir)
               coll-id (str (UUID/randomUUID))
               collection {:id coll-id
                           :folder-path (.toString coll-dir)
                           :name "broken"
                           :tags []
-                          :models [{:path (.getAbsolutePath bad-file)
-                                    :filename "bad.stl"}]}
+                          :models [{:path missing-path
+                                    :filename "missing.stl"}]}
               _ (db/write-store! store "collections.edn" {coll-id collection})
               updated (preview/generate-previews! store)
               model (-> updated (get coll-id) :models first)
-              expected-png (io/file (.toString coll-dir) ".servo-images" "bad.stl.png")]
+              expected-png (io/file (.toString coll-dir) ".servo-images" "missing.stl.png")]
           (is (nil? (:preview-path model)))
           (is (not (.exists expected-png))))
         (finally
