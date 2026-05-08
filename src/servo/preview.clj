@@ -12,10 +12,7 @@
   (.mkdirs (io/file folder-path ".servo-images")))
 
 (defn- f3d-args [output-path model-path]
-  (let [backend (System/getenv "F3D_RENDERING_BACKEND")]
-    (cond-> ["f3d"]
-      backend (conj "--rendering-backend" backend)
-      true    (concat ["--output" output-path model-path]))))
+  ["f3d" "--output" output-path model-path])
 
 (defn- render-preview! [model-path output-path]
   (let [args                    (f3d-args output-path model-path)

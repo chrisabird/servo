@@ -33,7 +33,7 @@ jobs:
       - name: Install f3d
         run: |
           sudo apt-get update && sudo apt-get install -y --no-install-recommends \
-            libegl1 libosmesa6 libosmesa6-dev libgomp1
+            libosmesa6 libosmesa6-dev libgomp1
           curl -fsSL \
             "https://github.com/f3d-app/f3d/releases/download/v3.2.0/f3d-3.2.0-Linux-x86_64.tar.gz" \
             -o /tmp/f3d.tar.gz
@@ -47,8 +47,6 @@ jobs:
         run: npm ci && npm run css:build
 
       - name: Run tests
-        env:
-          F3D_RENDERING_BACKEND: osmesa
         run: clojure -M:test
 
       - name: Build uberjar
