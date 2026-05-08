@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## CI / GitHub Actions
+
+Use `clojure` (not `clj`) in GHA workflow steps — `clj` requires `rlwrap` which is not installed on GHA runners and will fail with exit code 1.
+
 ## Release
 
 Push a `v*` git tag to trigger the GitHub Actions release workflow:
