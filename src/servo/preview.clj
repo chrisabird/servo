@@ -12,7 +12,7 @@
   (.mkdirs (io/file folder-path ".servo-images")))
 
 (defn- render-preview! [model-path output-path]
-  (let [{:keys [exit err]} (shell/sh "f3d" "--output" output-path model-path)]
+  (let [{:keys [exit err]} (shell/sh "f3d" "--rendering-backend" "osmesa" "--output" output-path model-path)]
     (if (zero? exit)
       output-path
       (do
