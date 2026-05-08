@@ -18,13 +18,18 @@
       true    (concat ["--output" output-path model-path]))))
 
 (defn- render-preview! [model-path output-path]
-  (let [{:keys [exit err]} (apply shell/sh (f3d-args output-path model-path))]
-    (if (zero? exit)
+  (let [args                    (f3d-args output-path model-path)
+        {:keys [exit out err]}  (apply shell/sh args)
+        png-exists?             (.exists (io/file output-path))]
+    (log/log! {:level :debug
+               :msg "f3d result"
+               :data {:cmd args :exit exit :out out :err err :png-exists png-exists?}})
+    (if (and (zero? exit) png-exists?)
       output-path
       (do
         (log/log! {:level :error
                    :msg "f3d failed"
-                   :data {:model model-path :exit exit :err err}})
+                   :data {:cmd args :exit exit :out out :err err :png-exists png-exists?}})
         nil))))
 
 (defn- process-model [folder-path {:keys [path filename] :as model}]

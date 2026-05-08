@@ -31,7 +31,7 @@ jobs:
           node-version: 22
 
       - name: Install f3d
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends f3d libosmesa6 libosmesa6-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends f3d libegl1 libosmesa6 libosmesa6-dev
 
       - name: Build CSS
         run: npm ci && npm run css:build
