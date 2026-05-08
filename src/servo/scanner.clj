@@ -2,6 +2,7 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [servo.db :as db]
+            [servo.pattern :as pattern]
             [servo.preview :as preview])
   (:import (java.io File)
            (java.util Date UUID)))
@@ -26,36 +27,62 @@
                :filename (.getName f)}))
        vec))
 
-(defn- immediate-subdirs [^File root]
-  (->> (.listFiles root)
-       (filter (fn [^File f] (.isDirectory f)))))
+(defn- subdirs-to-depth
+  "Returns a lazy seq of every descendant directory of `root`, up to `max-depth`
+  levels deep. Excludes `root` itself."
+  [^File root max-depth]
+  (letfn [(step [^File dir d]
+            (when (< d max-depth)
+              (let [children (->> (.listFiles dir)
+                                  (filter (fn [^File f] (.isDirectory f))))]
+                (lazy-cat children (mapcat #(step % (inc d)) children)))))]
+    (step root 0)))
 
-(defn- new-collection [^File dir]
-  {:id (str (UUID/randomUUID))
-   :folder-path (.getAbsolutePath dir)
-   :name (.getName dir)
-   :tags []
-   :models (find-models dir)
-   :scanned-at (Date.)})
+(defn- path-segments
+  "Returns the segments of `dir` relative to `root` as a vector of strings."
+  [^File root ^File dir]
+  (let [rel (.relativize (.toPath root) (.toPath dir))]
+    (mapv str (iterator-seq (.iterator rel)))))
 
-(defn- refresh-collection [existing ^File dir]
-  (assoc existing
-         :models (find-models dir)
-         :scanned-at (Date.)))
+(defn- first-match
+  "Returns [parsed-pattern captures] for the first pattern whose length equals
+  segments and whose match succeeds, or nil if none match."
+  [parsed-patterns segments]
+  (some (fn [parsed]
+          (when (= (count parsed) (count segments))
+            (when-let [captures (pattern/match parsed segments)]
+              [parsed captures])))
+        parsed-patterns))
 
-(defn- collection-for [existing-by-path ^File dir]
-  (if-let [existing (get existing-by-path (.getAbsolutePath dir))]
-    (refresh-collection existing dir)
-    (new-collection dir)))
+(defn- build-collection [existing-by-path ^File dir segments captures]
+  (let [folder-path (.getAbsolutePath dir)
+        existing (get existing-by-path folder-path)]
+    {:id (or (:id existing) (str (UUID/randomUUID)))
+     :folder-path folder-path
+     :name (pattern/derive-name segments)
+     :pattern-tags (pattern/derive-tags captures)
+     :tags (or (:tags existing) [])
+     :models (find-models dir)
+     :scanned-at (Date.)}))
 
 (defn scan-root! [root-path store & {:keys [on-progress] :or {on-progress (constantly nil)}}]
-  (let [root (io/file root-path)
-        _ (on-progress {:message "Discovering collections..."})
-        existing (db/read-store store "collections.edn" {})
-        existing-by-path (into {} (map (juxt :folder-path identity)) (vals existing))
-        collections (->> (immediate-subdirs root)
-                         (map #(collection-for existing-by-path %))
-                         (reduce (fn [acc c] (assoc acc (:id c) c)) {}))]
-    (db/write-store! store "collections.edn" collections)
-    (on-progress {:message (str "Found " (count collections) " collections, generating previews...")})
-    (preview/generate-previews! store :on-progress on-progress)))
+  (let [_ (on-progress {:message "Discovering collections..."})
+        patterns (db/read-store store "patterns.edn" [])
+        parsed-patterns (mapv #(pattern/parse-pattern (:pattern %)) patterns)]
+    (if (empty? parsed-patterns)
+      (do
+        (db/write-store! store "collections.edn" {})
+        {})
+      (let [root (io/file root-path)
+            max-depth (apply max (map count parsed-patterns))
+            existing (db/read-store store "collections.edn" {})
+            existing-by-path (into {} (map (juxt :folder-path identity)) (vals existing))
+            collections (->> (subdirs-to-depth root max-depth)
+                             (keep (fn [^File dir]
+                                     (let [segs (path-segments root dir)]
+                                       (when-let [[_ captures] (first-match parsed-patterns segs)]
+                                         (build-collection existing-by-path dir segs captures)))))
+                             (reduce (fn [acc c] (assoc acc (:id c) c)) {}))]
+        (db/write-store! store "collections.edn" collections)
+        (on-progress {:message (str "Found " (count collections) " collections, generating previews...")})
+        (preview/generate-previews! store :on-progress on-progress)))))

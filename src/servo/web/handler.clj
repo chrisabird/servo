@@ -8,6 +8,7 @@
             [ring.middleware.params :as params]
             [ring.middleware.resource :as resource]
             [servo.db :as db]
+            [servo.pattern :as pattern]
             [servo.scan :as scan]))
 
 (defn- layout [title & body]
@@ -26,7 +27,15 @@
       [:nav {:class "navbar bg-base-200 border-b border-base-300 px-4"}
        [:div {:class "navbar-start"}
         [:a {:href "/" :class "text-xl font-bold tracking-tight"} "Servo"]]
-       [:div {:class "navbar-end"}
+       [:div {:class "navbar-end gap-2"}
+        [:a {:href "/patterns" :class "btn btn-ghost btn-sm gap-2"}
+         [:svg {:xmlns "http://www.w3.org/2000/svg" :class "h-4 w-4" :viewBox "0 0 24 24"
+                :fill "none" :stroke "currentColor" :stroke-width "2"
+                :stroke-linecap "round" :stroke-linejoin "round"}
+          [:path {:d "M3 6h18"}]
+          [:path {:d "M3 12h18"}]
+          [:path {:d "M3 18h18"}]]
+         "Patterns"]
         [:a {:href "/scan" :class "btn btn-ghost btn-sm gap-2"}
          [:svg {:xmlns "http://www.w3.org/2000/svg" :class "h-4 w-4" :viewBox "0 0 24 24"
                 :fill "none" :stroke "currentColor" :stroke-width "2"
@@ -57,7 +66,7 @@
   [:div {:class "aspect-square bg-base-300 rounded flex items-center justify-center mb-3 text-base-content/60"}
    "No models"])
 
-(defn- collection-card [{:keys [id name tags models]}]
+(defn- collection-card [{:keys [id name tags pattern-tags models] :or {pattern-tags []}}]
   [:div {:class "card bg-base-200 shadow-md hover:shadow-xl transition-shadow relative"}
    [:div {:class "card-body p-4"}
     (if (seq models)
@@ -69,6 +78,10 @@
           :class "absolute inset-0 z-0"}]
      name]
     [:div {:class "relative z-10 flex flex-wrap gap-1 mt-2 items-center"}
+     (for [tag pattern-tags]
+       [:a {:href  (str "/?q=" tag)
+            :class "badge badge-sm badge-primary"}
+        tag])
      (for [tag tags]
        [:a {:href  (str "/?q=" tag)
             :class "badge badge-sm badge-secondary"}
@@ -81,9 +94,10 @@
     collections
     (let [needle (str/lower-case q)
           match? (fn [s] (and s (str/includes? (str/lower-case s) needle)))]
-      (filter (fn [{:keys [name tags]}]
+      (filter (fn [{:keys [name tags pattern-tags]}]
                 (or (match? name)
-                    (some match? tags)))
+                    (some match? tags)
+                    (some match? pattern-tags)))
               collections))))
 
 (defn- collection-grid [collections]
@@ -145,7 +159,7 @@
              :body    file}
             not-found))))))
 
-(defn- collection-detail-region [id name-value tags]
+(defn- collection-detail-region [id name-value tags pattern-tags]
   [:div {:id "detail-region"}
    [:input {:type "text" :name "name" :value name-value
             :class "input input-lg font-bold w-full mb-4"
@@ -154,6 +168,10 @@
             :hx-target "#detail-region"
             :hx-swap "outerHTML"
             :hx-include "#tags-form"}]
+   (when (seq pattern-tags)
+     [:div {:class "flex flex-wrap gap-2 mb-2"}
+      (for [tag pattern-tags]
+        [:span {:class "badge badge-primary"} tag])])
    [:div {:id "tags-form"
           :x-data (str "tagEditor(" (json/write-value-as-string {:tags tags :id id}) ")")}
     [:div {:class "flex flex-wrap gap-2 mb-2"}
@@ -200,20 +218,34 @@
 }")
 
 (defn- model-tile [collection-id m]
-  [:div {:class "flex flex-col items-center gap-1"}
-   [:img {:src (str "/previews/" collection-id "/" (:filename m) ".png")
-          :class "rounded shadow w-full aspect-square object-cover"}]
-   [:span {:class "text-xs text-center truncate w-full"} (:filename m)]])
+  (let [src (str "/previews/" collection-id "/" (:filename m) ".png")]
+    [:div {:class "flex flex-col items-center gap-1"}
+     [:img {:src   src
+            :class "rounded shadow w-full aspect-square object-cover cursor-pointer"
+            "@click" (str "open = true; src = '" src "'")}]
+     [:span {:class "text-xs text-center truncate w-full"} (:filename m)]]))
 
 (defn- model-grid [collection-id models]
   (into [:div {:class "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-6"}]
         (map #(model-tile collection-id %) models)))
 
-(defn- collection-detail-page [{:keys [id name tags models]}]
+(def ^:private lightbox-overlay
+  [:div {:x-show                    "open"
+         "x-transition.opacity"     true
+         "@click.self"              "open = false"
+         "@keydown.escape.window"   "open = false"
+         :class                     "fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+         :style                     "display: none"}
+   [:img {"x-bind:src" "src"
+          :class       "max-w-full max-h-full object-contain rounded shadow-2xl"}]])
+
+(defn- collection-detail-page [{:keys [id name tags pattern-tags models] :or {pattern-tags []}}]
   (layout name
           [:a {:href "/" :class "btn btn-ghost btn-sm mb-6"} "← Back"]
-          (collection-detail-region id name tags)
-          (model-grid id models)
+          (collection-detail-region id name tags pattern-tags)
+          [:div {:x-data "{ open: false, src: '' }"}
+           (model-grid id models)
+           lightbox-overlay]
           [:script (h/raw tag-editor-script)]))
 
 (defn- collection-detail-handler [db]
@@ -241,13 +273,14 @@
     (let [collections (db/read-store db "collections.edn" {})]
       (if-not (contains? collections id)
         not-found
-        (let [name-value (or (get form-params "name") "")
-              tags       (form-tags form-params)
-              updated    (update collections id merge {:name name-value :tags tags})]
+        (let [name-value   (or (get form-params "name") "")
+              tags         (form-tags form-params)
+              pattern-tags (get-in collections [id :pattern-tags] [])
+              updated      (update collections id merge {:name name-value :tags tags})]
           (db/write-store! db "collections.edn" updated)
           {:status  200
            :headers {"content-type" "text/html; charset=utf-8"}
-           :body    (str (h/html (collection-detail-region id name-value tags)))})))))
+           :body    (str (h/html (collection-detail-region id name-value tags pattern-tags)))})))))
 
 (defn- all-tags [collections]
   (->> collections vals (mapcat :tags) distinct))
@@ -339,12 +372,108 @@
   (fn [_req]
     (html-response (scan-status-fragment (scan/get-state)))))
 
+(defn- patterns-page [patterns {:keys [error name-value pattern-value]}]
+  (layout
+   "servo — patterns"
+   [:div {:class "max-w-2xl"}
+    [:h1 {:class "text-2xl font-bold mb-2"} "Patterns"]
+    [:p {:class "mb-6 text-base-content/70"}
+     "Order matters — first match wins at scan time."]
+    (if (seq patterns)
+      [:table {:class "table table-zebra mb-8"}
+       [:thead [:tr [:th "Name"] [:th "Pattern"] [:th]]]
+       (into [:tbody]
+             (for [{:keys [id name pattern]} patterns]
+               [:tr
+                [:td name]
+                [:td [:code {:class "font-mono"} pattern]]
+                [:td
+                 [:form {:method "post" :action (str "/patterns/" id "/delete")}
+                  [:button {:type "submit" :class "btn btn-ghost btn-sm text-error"}
+                   "Delete"]]]]))]
+      [:p {:class "mb-8 text-base-content/60"} "No patterns yet."])
+    [:h2 {:class "text-lg font-semibold mb-3"} "Add pattern"]
+    (when error
+      [:div {:class "alert alert-error mb-4"} [:span error]])
+    [:form {:method "post" :action "/patterns" :class "flex flex-col gap-3"}
+     [:label {:class "form-control"}
+      [:span {:class "label-text mb-1"} "Name"]
+      [:input {:type "text" :name "name" :value (or name-value "")
+               :class "input input-bordered" :placeholder "Warhammer 40k"}]]
+     [:label {:class "form-control"}
+      [:span {:class "label-text mb-1"} "Pattern"]
+      [:input {:type "text" :name "pattern" :value (or pattern-value "")
+               :class "input input-bordered font-mono"
+               :placeholder "40k/{unit_type}/{unit}/{creator}"}]]
+     [:button {:type "submit" :class "btn btn-primary self-start"} "Add"]]]))
+
+(defn- read-patterns [db]
+  (db/read-store db "patterns.edn" []))
+
+(defn- redirect-to [path]
+  {:status 303 :headers {"location" path} :body ""})
+
+(defn- find-conflict [existing-patterns new-parsed]
+  (->> existing-patterns
+       (filter #(pattern/conflict? new-parsed (pattern/parse-pattern (:pattern %))))
+       first))
+
+(defn- patterns-index-handler [db]
+  (fn [_req]
+    {:status  200
+     :headers {"content-type" "text/html; charset=utf-8"}
+     :body    (patterns-page (read-patterns db) {})}))
+
+(defn- render-patterns-error [db error name-value pattern-value]
+  {:status  200
+   :headers {"content-type" "text/html; charset=utf-8"}
+   :body    (patterns-page (read-patterns db)
+                           {:error         error
+                            :name-value    name-value
+                            :pattern-value pattern-value})})
+
+(defn- patterns-create-handler [db]
+  (fn [{:keys [form-params]}]
+    (let [name-value    (str/trim (or (get form-params "name") ""))
+          pattern-value (str/trim (or (get form-params "pattern") ""))
+          existing      (read-patterns db)]
+      (cond
+        (str/blank? name-value)
+        (render-patterns-error db "Name is required." name-value pattern-value)
+
+        (str/blank? pattern-value)
+        (render-patterns-error db "Pattern is required." name-value pattern-value)
+
+        :else
+        (let [new-parsed (pattern/parse-pattern pattern-value)
+              conflict   (find-conflict existing new-parsed)]
+          (if conflict
+            (render-patterns-error
+             db
+             (str "Conflicts with existing pattern \"" (:name conflict)
+                  "\" (" (:pattern conflict) ").")
+             name-value pattern-value)
+            (let [new-pattern {:id      (str (java.util.UUID/randomUUID))
+                               :name    name-value
+                               :pattern pattern-value}]
+              (db/write-store! db "patterns.edn" (conj existing new-pattern))
+              (redirect-to "/patterns"))))))))
+
+(defn- patterns-delete-handler [db]
+  (fn [{{:keys [id]} :path-params}]
+    (let [patterns (read-patterns db)]
+      (db/write-store! db "patterns.edn" (filterv #(not= id (:id %)) patterns))
+      (redirect-to "/patterns"))))
+
 (defn- routes [config db]
   [["/"                                  {:get   (index-handler db)}]
    ["/health"                            {:get   health-handler}]
    ["/scan"                              {:get   (scan-page-handler config db)
                                           :post  (scan-post-handler config db)}]
    ["/scan/status"                       {:get   (scan-status-handler)}]
+   ["/patterns"                          {:get  (patterns-index-handler db)
+                                          :post (patterns-create-handler db)}]
+   ["/patterns/:id/delete"               {:post (patterns-delete-handler db)}]
    ["/collections/:id"                   {:get   (collection-detail-handler db)
                                           :patch (collection-patch-handler db)}]
    ["/tags/autocomplete"                 {:get   (tags-autocomplete-handler db)}]

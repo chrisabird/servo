@@ -27,6 +27,9 @@
 (defn- test-store [^Path dir]
   (db/map->Store {:dir (.toString dir)}))
 
+(defn- write-default-patterns! [store]
+  (db/write-store! store "patterns.edn" [{:id "p1" :name "Top" :pattern "{name}"}]))
+
 (defn- copy-fixture! [^Path dest-dir filename]
   (let [dest (.resolve dest-dir ^String filename)]
     (io/copy (io/file "test/fixtures/cube.stl") (.toFile dest))
@@ -43,6 +46,7 @@
         (let [coll-dir (mk-subdir root "widgets")
               _ (copy-fixture! coll-dir "cube.stl")
               store (test-store store-dir)
+              _ (write-default-patterns! store)
               collections (scanner/scan-root! (.toString root) store)
               coll (collection-by-name collections "widgets")
               model (first (:models coll))
@@ -61,6 +65,7 @@
         (let [coll-dir (mk-subdir root "widgets")
               _ (copy-fixture! coll-dir "cube.stl")
               store (test-store store-dir)
+              _ (write-default-patterns! store)
               _ (scanner/scan-root! (.toString root) store)
               png (io/file (.toString coll-dir) ".servo-images" "cube.stl.png")
               first-modified (.lastModified png)]

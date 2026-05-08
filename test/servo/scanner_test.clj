@@ -29,51 +29,56 @@
 (defn- test-store [^Path dir]
   (db/map->Store {:dir (.toString dir)}))
 
+(defn- write-patterns! [store patterns]
+  (db/write-store! store "patterns.edn" patterns))
+
 (defn- collection-by-name [collections name]
   (->> collections vals (filter #(= name (:name %))) first))
 
 (deftest fresh-scan-produces-collections
-  (testing "two subdirs become two collections with correct fields"
+  (testing "subdirs matching pattern become collections with derived fields"
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
-        (let [dir-a (mk-subdir root "alpha")
-              dir-b (mk-subdir root "beta")
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Game" :pattern "game/{name}"}])
+              game (mk-subdir root "game")
+              dir-a (mk-subdir game "alpha")
+              dir-b (mk-subdir game "beta")
               _ (mk-file dir-a "one.stl")
-              _ (mk-file dir-a "two.stl")
               nested (mk-subdir dir-b "inner")
               _ (mk-file nested "model.obj")
-              store (test-store store-dir)
               collections (scanner/scan-root! (.toString root) store)
-              by-name (into {} (map (juxt :name identity)) (vals collections))
-              alpha (get by-name "alpha")
-              beta (get by-name "beta")]
+              alpha (collection-by-name collections "game / alpha")
+              beta (collection-by-name collections "game / beta")]
           (is (= 2 (count collections)))
-          (is (= #{"alpha" "beta"} (set (keys by-name))))
           (is (= (.toString dir-a) (:folder-path alpha)))
           (is (= (.toString dir-b) (:folder-path beta)))
+          (is (= ["alpha"] (:pattern-tags alpha)))
+          (is (= ["beta"] (:pattern-tags beta)))
           (is (= [] (:tags alpha)))
           (is (= [] (:tags beta)))
-          (is (= #{"one.stl" "two.stl"} (set (map :filename (:models alpha)))))
+          (is (= "game / alpha" (:name alpha)))
+          (is (= "game / beta" (:name beta)))
+          (is (= #{"one.stl"} (set (map :filename (:models alpha)))))
           (is (= #{"model.obj"} (set (map :filename (:models beta)))))
           (is (= collections (db/read-store store "collections.edn" {}))))
         (finally
           (delete-tree! root)
           (delete-tree! store-dir))))))
 
-(deftest rescan-preserves-name-and-tags
-  (testing "user-edited :name and :tags survive rescan; :models and :scanned-at refresh"
+(deftest rescan-preserves-manual-tags
+  (testing "user-edited :tags survive rescan; :pattern-tags and :models refresh"
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
-        (let [dir-a (mk-subdir root "gadgets")
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "gadgets")
               file-old (mk-file dir-a "old.stl")
-              store (test-store store-dir)
               first-scan (scanner/scan-root! (.toString root) store)
               [coll-id coll] (first first-scan)
-              edited (assoc coll
-                            :name "Custom Gadgets"
-                            :tags ["mechanical" "wip"])
+              edited (assoc coll :tags ["mechanical" "wip"])
               _ (db/write-store! store "collections.edn" {coll-id edited})
               _ (Files/deleteIfExists file-old)
               _ (mk-file dir-a "new-a.stl")
@@ -82,8 +87,9 @@
               second-scan (scanner/scan-root! (.toString root) store)
               refreshed (get second-scan coll-id)]
           (is (= 1 (count second-scan)))
-          (is (= "Custom Gadgets" (:name refreshed)))
+          (is (= "gadgets" (:name refreshed)))
           (is (= ["mechanical" "wip"] (:tags refreshed)))
+          (is (= ["gadgets"] (:pattern-tags refreshed)))
           (is (= #{"new-a.stl" "new-b.3mf"}
                  (set (map :filename (:models refreshed)))))
           (is (.after ^java.util.Date (:scanned-at refreshed)
@@ -92,16 +98,17 @@
           (delete-tree! root)
           (delete-tree! store-dir))))))
 
-(deftest rescan-removes-deleted-folder
+(deftest rescan-removes-unmatched-collection
   (testing "a collection whose folder no longer exists is dropped on rescan"
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
-        (let [dir-a (mk-subdir root "keepers")
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "keepers")
               dir-b (mk-subdir root "doomed")
               _ (mk-file dir-a "a.stl")
               _ (mk-file dir-b "b.stl")
-              store (test-store store-dir)
               _ (scanner/scan-root! (.toString root) store)
               _ (delete-tree! dir-b)
               second-scan (scanner/scan-root! (.toString root) store)]
@@ -117,11 +124,12 @@
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
-        (let [dir-a (mk-subdir root "mixed")
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "mixed")
               _ (mk-file dir-a "readme.txt")
               _ (mk-file dir-a "preview.png")
               _ (mk-file dir-a "part.stl")
-              store (test-store store-dir)
               collections (scanner/scan-root! (.toString root) store)
               coll (collection-by-name collections "mixed")]
           (is (= 1 (count collections)))
@@ -135,10 +143,11 @@
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
-        (let [dir-a (mk-subdir root "real")
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "real")
               _ (mk-file dir-a "inside.stl")
               _ (mk-file root "loose.stl")
-              store (test-store store-dir)
               collections (scanner/scan-root! (.toString root) store)]
           (is (= 1 (count collections)))
           (is (= "real" (:name (first (vals collections)))))
@@ -146,6 +155,70 @@
                  (set (map :filename (:models (first (vals collections)))))))
           (is (every? #(not= "loose.stl" (:filename %))
                       (mapcat :models (vals collections)))))
+        (finally
+          (delete-tree! root)
+          (delete-tree! store-dir))))))
+
+(deftest zero-patterns-produces-no-collections
+  (testing "with no patterns, scan returns {} and writes {} to store"
+    (let [root (temp-dir "servo-scan-root-")
+          store-dir (temp-dir "servo-scan-store-")]
+      (try
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [])
+              dir-a (mk-subdir root "lonely")
+              _ (mk-file dir-a "thing.stl")
+              collections (scanner/scan-root! (.toString root) store)]
+          (is (= {} collections))
+          (is (= {} (db/read-store store "collections.edn" :missing))))
+        (finally
+          (delete-tree! root)
+          (delete-tree! store-dir))))))
+
+(deftest multiple-patterns-match-different-subtrees
+  (testing "two patterns each match their own subtree"
+    (let [root (temp-dir "servo-scan-root-")
+          store-dir (temp-dir "servo-scan-store-")]
+      (try
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Game" :pattern "game/{unit}"}
+                                        {:id "p2" :name "Terrain" :pattern "terrain/{type}"}])
+              game (mk-subdir root "game")
+              terrain (mk-subdir root "terrain")
+              marines (mk-subdir game "marines")
+              forest (mk-subdir terrain "forest")
+              _ (mk-file marines "m.stl")
+              _ (mk-file forest "f.stl")
+              collections (scanner/scan-root! (.toString root) store)
+              g (collection-by-name collections "game / marines")
+              t (collection-by-name collections "terrain / forest")]
+          (is (= 2 (count collections)))
+          (is (= ["marines"] (:pattern-tags g)))
+          (is (= ["forest"] (:pattern-tags t)))
+          (is (= "game / marines" (:name g)))
+          (is (= "terrain / forest" (:name t))))
+        (finally
+          (delete-tree! root)
+          (delete-tree! store-dir))))))
+
+(deftest first-match-wins
+  (testing "when two patterns of equal length match, first wins"
+    (let [root (temp-dir "servo-scan-root-")
+          store-dir (temp-dir "servo-scan-store-")]
+      (try
+        (let [store (test-store store-dir)
+              ;; Both patterns would match 40k/<anything> — write directly,
+              ;; bypassing UI conflict validation.
+              _ (write-patterns! store [{:id "p1" :name "Unit" :pattern "40k/{unit}"}
+                                        {:id "p2" :name "Creator" :pattern "40k/{creator}"}])
+              top (mk-subdir root "40k")
+              marines (mk-subdir top "marines")
+              _ (mk-file marines "m.stl")
+              collections (scanner/scan-root! (.toString root) store)
+              coll (first (vals collections))]
+          (is (= 1 (count collections)))
+          (is (= ["marines"] (:pattern-tags coll)))
+          (is (= "40k / marines" (:name coll))))
         (finally
           (delete-tree! root)
           (delete-tree! store-dir))))))
