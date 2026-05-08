@@ -45,43 +45,46 @@
     (mapv str (iterator-seq (.iterator rel)))))
 
 (defn- first-match
-  "Returns [parsed-pattern captures] for the first pattern whose length equals
-  segments and whose match succeeds, or nil if none match."
-  [parsed-patterns segments]
-  (some (fn [parsed]
+  "Returns [pattern-name captures] for the first named pattern whose length
+  equals segments and whose match succeeds, or nil if none match.
+  named-patterns is a seq of [name parsed-pattern]."
+  [named-patterns segments]
+  (some (fn [[pname parsed]]
           (when (= (count parsed) (count segments))
             (when-let [captures (pattern/match parsed segments)]
-              [parsed captures])))
-        parsed-patterns))
+              [pname captures])))
+        named-patterns))
 
-(defn- build-collection [existing-by-path ^File dir segments captures]
-  (let [folder-path (.getAbsolutePath dir)
-        existing (get existing-by-path folder-path)]
-    {:id (or (:id existing) (str (UUID/randomUUID)))
+(defn- build-collection [existing-by-path ^File dir segments pattern-name captures]
+  (let [folder-path   (.getAbsolutePath dir)
+        existing      (get existing-by-path folder-path)
+        derived       (cons pattern-name (pattern/derive-tags captures))
+        existing-tags (or (:tags existing) [])
+        merged-tags   (vec (distinct (concat derived existing-tags)))]
+    {:id          (or (:id existing) (str (UUID/randomUUID)))
      :folder-path folder-path
-     :name (pattern/derive-name segments)
-     :pattern-tags (pattern/derive-tags captures)
-     :tags (or (:tags existing) [])
-     :models (find-models dir)
-     :scanned-at (Date.)}))
+     :name        (pattern/derive-name segments)
+     :tags        merged-tags
+     :models      (find-models dir)
+     :scanned-at  (Date.)}))
 
 (defn scan-root! [root-path store & {:keys [on-progress] :or {on-progress (constantly nil)}}]
   (let [_ (on-progress {:message "Discovering collections..."})
         patterns (db/read-store store "patterns.edn" [])
-        parsed-patterns (mapv #(pattern/parse-pattern (:pattern %)) patterns)]
-    (if (empty? parsed-patterns)
+        named-patterns (mapv (fn [p] [(:name p) (pattern/parse-pattern (:pattern p))]) patterns)]
+    (if (empty? named-patterns)
       (do
         (db/write-store! store "collections.edn" {})
         {})
       (let [root (io/file root-path)
-            max-depth (apply max (map count parsed-patterns))
+            max-depth (apply max (map #(count (second %)) named-patterns))
             existing (db/read-store store "collections.edn" {})
             existing-by-path (into {} (map (juxt :folder-path identity)) (vals existing))
             collections (->> (subdirs-to-depth root max-depth)
                              (keep (fn [^File dir]
                                      (let [segs (path-segments root dir)]
-                                       (when-let [[_ captures] (first-match parsed-patterns segs)]
-                                         (build-collection existing-by-path dir segs captures)))))
+                                       (when-let [[pname captures] (first-match named-patterns segs)]
+                                         (build-collection existing-by-path dir segs pname captures)))))
                              (reduce (fn [acc c] (assoc acc (:id c) c)) {}))]
         (db/write-store! store "collections.edn" collections)
         (on-progress {:message (str "Found " (count collections) " collections, generating previews...")})

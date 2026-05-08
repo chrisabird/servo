@@ -39,6 +39,8 @@ jobs:
             -o /tmp/f3d.tar.gz
           mkdir /tmp/f3d && tar -xzf /tmp/f3d.tar.gz -C /tmp/f3d --strip-components=1
           sudo cp /tmp/f3d/bin/f3d /usr/local/bin/f3d
+          sudo cp -r /tmp/f3d/lib/* /usr/local/lib/
+          sudo ldconfig
           rm -rf /tmp/f3d /tmp/f3d.tar.gz
 
       - name: Build CSS

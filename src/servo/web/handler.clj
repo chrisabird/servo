@@ -66,7 +66,7 @@
   [:div {:class "aspect-square bg-base-300 rounded flex items-center justify-center mb-3 text-base-content/60"}
    "No models"])
 
-(defn- collection-card [{:keys [id name tags pattern-tags models] :or {pattern-tags []}}]
+(defn- collection-card [{:keys [id name tags models]}]
   [:div {:class "card bg-base-200 shadow-md hover:shadow-xl transition-shadow relative"}
    [:div {:class "card-body p-4"}
     (if (seq models)
@@ -78,10 +78,6 @@
           :class "absolute inset-0 z-0"}]
      name]
     [:div {:class "relative z-10 flex flex-wrap gap-1 mt-2 items-center"}
-     (for [tag pattern-tags]
-       [:a {:href  (str "/?q=" tag)
-            :class "badge badge-sm badge-primary"}
-        tag])
      (for [tag tags]
        [:a {:href  (str "/?q=" tag)
             :class "badge badge-sm badge-secondary"}
@@ -94,10 +90,9 @@
     collections
     (let [needle (str/lower-case q)
           match? (fn [s] (and s (str/includes? (str/lower-case s) needle)))]
-      (filter (fn [{:keys [name tags pattern-tags]}]
+      (filter (fn [{:keys [name tags]}]
                 (or (match? name)
-                    (some match? tags)
-                    (some match? pattern-tags)))
+                    (some match? tags)))
               collections))))
 
 (defn- collection-grid [collections]
@@ -159,7 +154,7 @@
              :body    file}
             not-found))))))
 
-(defn- collection-detail-region [id name-value tags pattern-tags]
+(defn- collection-detail-region [id name-value tags]
   [:div {:id "detail-region"}
    [:input {:type "text" :name "name" :value name-value
             :class "input input-lg font-bold w-full mb-4"
@@ -168,10 +163,6 @@
             :hx-target "#detail-region"
             :hx-swap "outerHTML"
             :hx-include "#tags-form"}]
-   (when (seq pattern-tags)
-     [:div {:class "flex flex-wrap gap-2 mb-2"}
-      (for [tag pattern-tags]
-        [:span {:class "badge badge-primary"} tag])])
    [:div {:id "tags-form"
           :x-data (str "tagEditor(" (json/write-value-as-string {:tags tags :id id}) ")")}
     [:div {:class "flex flex-wrap gap-2 mb-2"}
@@ -215,6 +206,14 @@
       });
     }
   }
+}
+function lightbox() {
+  return {
+    open: false,
+    photoUrl: '',
+    show(url) { this.photoUrl = url; this.open = true; },
+    close() { this.open = false; }
+  }
 }")
 
 (defn- model-tile [collection-id m]
@@ -222,7 +221,7 @@
     [:div {:class "flex flex-col items-center gap-1"}
      [:img {:src   src
             :class "rounded shadow w-full aspect-square object-cover cursor-pointer"
-            "@click" (str "open = true; src = '" src "'")}]
+            "@click" "show($event.target.src)"}]
      [:span {:class "text-xs text-center truncate w-full"} (:filename m)]]))
 
 (defn- model-grid [collection-id models]
@@ -230,20 +229,19 @@
         (map #(model-tile collection-id %) models)))
 
 (def ^:private lightbox-overlay
-  [:div {:x-show                    "open"
-         "x-transition.opacity"     true
-         "@click.self"              "open = false"
-         "@keydown.escape.window"   "open = false"
-         :class                     "fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-         :style                     "display: none"}
-   [:img {"x-bind:src" "src"
-          :class       "max-w-full max-h-full object-contain rounded shadow-2xl"}]])
+  [:div {:x-show                   "open"
+         "@click.self"             "close()"
+         "@keydown.escape.window"  "close()"
+         :class                    "fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+         :style                    "display: none"}
+   [:img {:x-bind:src "photoUrl"
+          :class      "max-w-full max-h-full object-contain rounded shadow-2xl"}]])
 
-(defn- collection-detail-page [{:keys [id name tags pattern-tags models] :or {pattern-tags []}}]
+(defn- collection-detail-page [{:keys [id name tags models]}]
   (layout name
           [:a {:href "/" :class "btn btn-ghost btn-sm mb-6"} "← Back"]
-          (collection-detail-region id name tags pattern-tags)
-          [:div {:x-data "{ open: false, src: '' }"}
+          (collection-detail-region id name tags)
+          [:div {:x-data "lightbox()"}
            (model-grid id models)
            lightbox-overlay]
           [:script (h/raw tag-editor-script)]))
@@ -273,14 +271,13 @@
     (let [collections (db/read-store db "collections.edn" {})]
       (if-not (contains? collections id)
         not-found
-        (let [name-value   (or (get form-params "name") "")
-              tags         (form-tags form-params)
-              pattern-tags (get-in collections [id :pattern-tags] [])
-              updated      (update collections id merge {:name name-value :tags tags})]
+        (let [name-value (or (get form-params "name") "")
+              tags       (form-tags form-params)
+              updated    (update collections id merge {:name name-value :tags tags})]
           (db/write-store! db "collections.edn" updated)
           {:status  200
            :headers {"content-type" "text/html; charset=utf-8"}
-           :body    (str (h/html (collection-detail-region id name-value tags pattern-tags)))})))))
+           :body    (str (h/html (collection-detail-region id name-value tags)))})))))
 
 (defn- all-tags [collections]
   (->> collections vals (mapcat :tags) distinct))

@@ -54,10 +54,8 @@
           (is (= 2 (count collections)))
           (is (= (.toString dir-a) (:folder-path alpha)))
           (is (= (.toString dir-b) (:folder-path beta)))
-          (is (= ["alpha"] (:pattern-tags alpha)))
-          (is (= ["beta"] (:pattern-tags beta)))
-          (is (= [] (:tags alpha)))
-          (is (= [] (:tags beta)))
+          (is (= ["Game" "alpha"] (:tags alpha)))
+          (is (= ["Game" "beta"] (:tags beta)))
           (is (= "game / alpha" (:name alpha)))
           (is (= "game / beta" (:name beta)))
           (is (= #{"one.stl"} (set (map :filename (:models alpha)))))
@@ -68,7 +66,7 @@
           (delete-tree! store-dir))))))
 
 (deftest rescan-preserves-manual-tags
-  (testing "user-edited :tags survive rescan; :pattern-tags and :models refresh"
+  (testing "user-edited :tags survive rescan; pattern-derived tags re-merged; :models refresh"
     (let [root (temp-dir "servo-scan-root-")
           store-dir (temp-dir "servo-scan-store-")]
       (try
@@ -88,8 +86,8 @@
               refreshed (get second-scan coll-id)]
           (is (= 1 (count second-scan)))
           (is (= "gadgets" (:name refreshed)))
-          (is (= ["mechanical" "wip"] (:tags refreshed)))
-          (is (= ["gadgets"] (:pattern-tags refreshed)))
+          ;; pattern name first, then captured tag, then preserved manual tags
+          (is (= ["Top" "gadgets" "mechanical" "wip"] (:tags refreshed)))
           (is (= #{"new-a.stl" "new-b.3mf"}
                  (set (map :filename (:models refreshed)))))
           (is (.after ^java.util.Date (:scanned-at refreshed)
@@ -193,8 +191,8 @@
               g (collection-by-name collections "game / marines")
               t (collection-by-name collections "terrain / forest")]
           (is (= 2 (count collections)))
-          (is (= ["marines"] (:pattern-tags g)))
-          (is (= ["forest"] (:pattern-tags t)))
+          (is (= ["Game" "marines"] (:tags g)))
+          (is (= ["Terrain" "forest"] (:tags t)))
           (is (= "game / marines" (:name g)))
           (is (= "terrain / forest" (:name t))))
         (finally
@@ -217,7 +215,7 @@
               collections (scanner/scan-root! (.toString root) store)
               coll (first (vals collections))]
           (is (= 1 (count collections)))
-          (is (= ["marines"] (:pattern-tags coll)))
+          (is (= ["Unit" "marines"] (:tags coll)))
           (is (= "40k / marines" (:name coll))))
         (finally
           (delete-tree! root)
