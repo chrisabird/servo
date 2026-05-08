@@ -1,0 +1,13 @@
+{
+  "name": "servo",
+  "private": true,
+  "scripts": {
+    "css:build": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css",
+    "css:watch": "tailwindcss -i resources/public/css/input.css -o resources/public/css/output.css --watch"
+  },
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.0.0",
+    "daisyui": "^5.0.0",
+    "tailwindcss": "^4.0.0"
+  }
+}

@@ -1,0 +1,29 @@
+{:paths ["src" "resources"]
+
+ :deps {org.clojure/clojure        {:mvn/version "1.12.0"}
+        ring/ring-core             {:mvn/version "1.15.4"}
+        ring/ring-jetty-adapter    {:mvn/version "1.15.4"}
+        metosin/reitit             {:mvn/version "0.10.1"}
+        metosin/reitit-ring        {:mvn/version "0.10.1"}
+        com.stuartsierra/component {:mvn/version "1.2.0"}
+        metosin/jsonista           {:mvn/version "1.0.0"}
+        hiccup/hiccup              {:mvn/version "2.0.0"}
+        com.taoensso/telemere      {:mvn/version "1.2.1"}
+        aero/aero                  {:mvn/version "1.1.6"}
+        hato/hato                  {:mvn/version "1.0.0"}}
+
+ :aliases
+ {:dev
+  {:extra-paths ["dev"]
+   :extra-deps  {reloaded.repl/reloaded.repl {:mvn/version "0.2.4"}
+                 nrepl/nrepl                 {:mvn/version "1.7.0"}}}
+
+  :test
+  {:extra-paths ["test"]
+   :extra-deps  {lambdaisland/kaocha {:mvn/version "1.91.1392"}}
+   :main-opts   ["-m" "kaocha.runner"]}
+
+  :build
+  {:deps       {io.github.clojure/tools.build  {:git/tag "v0.10.13" :git/sha "ae52edf"}
+                io.github.atomisthq/jibbit     {:git/tag "v0.1.14" :git/sha "ca4f7d3"}}
+   :ns-default clojure.tools.build.api}}}
