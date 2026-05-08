@@ -3,7 +3,6 @@ FROM eclipse-temurin:21-jre
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
       f3d \
-      libf3d-plugin-native \
       libosmesa6 \
       libosmesa6-dev \
     && rm -rf /var/lib/apt/lists/*
