@@ -25,10 +25,10 @@
 
 (defn image [_]
   (uber nil)
-  (jib/build {:image-type :tar
-              :tar-file   "target/servo-image.tar"
-              :image-name (str lib)
-              :tar-base-image {:image-name "eclipse-temurin:21-jre"
-                               :type :registry}
-              :main main
-              :uber-file uber-file}))
+  (jib/build {:image-type     :tar
+              :tar-file        "target/servo-image.tar"
+              :image-name      (str lib)
+              :tar-base-image  {:image-name "eclipse-temurin:21-jre"
+                                :type       :registry}
+              :main            main
+              :uber-file       uber-file}))

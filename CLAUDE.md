@@ -2,6 +2,25 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Release
+
+Push a `v*` git tag to trigger the GitHub Actions release workflow:
+
+```sh
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+The workflow (`.github/workflows/release.yml`) builds CSS, compiles the uberjar, then uses `docker/build-push-action` to build the `Dockerfile` and push both `ghcr.io/chrisabird/servo:<tag>` and `ghcr.io/chrisabird/servo:latest`. Auth uses the built-in `GITHUB_TOKEN` — no secrets to configure. Layer caching via GitHub Actions cache is enabled.
+
+The `Dockerfile` installs f3d 3.2.0 from the GitHub release tarball and the system OpenGL/EGL/OSMesa libraries needed for headless rendering.
+
+To test the image build locally:
+
+```sh
+mise run image:docker   # full Dockerfile build including f3d, requires Docker
+mise run image          # jibbit tar only (no f3d, fast — for JVM layer testing)
+```
+
 ## Commands
 
 ```sh

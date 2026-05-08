@@ -11,6 +11,14 @@ description = "Start the servo server"
 run = "clj -M:dev -m nrepl.cmdline --interactive --color"
 description = "Start a dev nREPL (with reloaded.repl)"
 
+[tasks.image]
+run = "clj -T:build image"
+description = "Build Docker image as local tar via jibbit (target/servo-image.tar, no f3d)"
+
+[tasks."image:docker"]
+run = "clj -T:build uber && docker build -t servo:local ."
+description = "Build Docker image locally via Dockerfile (includes f3d, requires Docker)"
+
 [tasks."css:build"]
 run = "npm run css:build"
 description = "Build Tailwind CSS once"
