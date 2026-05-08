@@ -31,7 +31,17 @@ jobs:
           node-version: 22
 
       - name: Install f3d
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends f3d libegl1 libosmesa6 libosmesa6-dev
+        run: |
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends \
+            libegl1 libosmesa6 libosmesa6-dev libgomp1
+          curl -fsSL \
+            "https://github.com/f3d-app/f3d/releases/download/v3.2.0/f3d-3.2.0-Linux-x86_64.tar.gz" \
+            -o /tmp/f3d.tar.gz
+          mkdir /tmp/f3d && tar -xzf /tmp/f3d.tar.gz -C /tmp/f3d --strip-components=1
+          sudo cp /tmp/f3d/bin/f3d /usr/local/bin/f3d
+          sudo cp -r /tmp/f3d/lib/* /usr/local/lib/
+          sudo ldconfig
+          rm -rf /tmp/f3d /tmp/f3d.tar.gz
 
       - name: Build CSS
         run: npm ci && npm run css:build
