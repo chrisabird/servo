@@ -1,3 +1,4 @@
 {:env #or [#env SERVO_ENV :dev]
  :server {:port #long #or [#env PORT "8080"]}
- :db {:dir #or [#env DB_DIR "data/db"]}}
+ :db {:dir #or [#env DB_DIR "data/db"]}
+ :stl-root #or [#env STL_ROOT "stl"]}

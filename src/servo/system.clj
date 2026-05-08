@@ -7,5 +7,5 @@
 (defn build-system [config]
   (component/system-map
    :db      (db/new-store config)
-   :handler (component/using (handler/new-handler) [:db])
+   :handler (component/using (handler/new-handler config) [:db])
    :server  (component/using (server/new-web-server config) [:handler])))

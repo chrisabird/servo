@@ -3,6 +3,8 @@ target/
 node_modules/
 resources/public/css/output.css
 data/
+stl/
 .nrepl-port
 *.class
 .DS_Store
+

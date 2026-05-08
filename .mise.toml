@@ -2,3 +2,23 @@
 java = "temurin-21"
 clojure = "1.12.0.1530"
 node = "22"
+
+[tasks.run]
+run = "clj -M -m servo.main"
+description = "Start the servo server"
+
+[tasks.dev]
+run = "clj -M:dev -m nrepl.cmdline --interactive --color"
+description = "Start a dev nREPL (with reloaded.repl)"
+
+[tasks."css:build"]
+run = "npm run css:build"
+description = "Build Tailwind CSS once"
+
+[tasks."css:watch"]
+run = "npm run css:watch"
+description = "Watch and rebuild Tailwind CSS on change"
+
+[tasks."test:all"]
+run = "clj -M:test"
+description = "Run full kaocha test suite"

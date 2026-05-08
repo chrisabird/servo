@@ -9,7 +9,8 @@
 (defn- test-config []
   {:env :test
    :server {:port test-port}
-   :db {:dir (str "data/test-db-" (System/currentTimeMillis))}})
+   :db {:dir (str "data/test-db-" (System/currentTimeMillis))}
+   :stl-root "/tmp"})
 
 (deftest system-lifecycle
   (testing "system starts, serves /health, and stops"
