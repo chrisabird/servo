@@ -50,7 +50,7 @@
               collections (scanner/scan-root! (.toString root) store)
               coll (collection-by-name collections "widgets")
               model (first (:models coll))
-              expected-png (io/file (.toString coll-dir) ".servo-images" "cube.stl.png")]
+              expected-png (io/file (.toString store-dir) "previews" (:id coll) (str (:id model) ".png"))]
           (is (.exists expected-png))
           (is (= (.getAbsolutePath expected-png) (:preview-path model))))
         (finally
@@ -66,8 +66,10 @@
               _ (copy-fixture! coll-dir "cube.stl")
               store (test-store store-dir)
               _ (write-default-patterns! store)
-              _ (scanner/scan-root! (.toString root) store)
-              png (io/file (.toString coll-dir) ".servo-images" "cube.stl.png")
+              collections (scanner/scan-root! (.toString root) store)
+              coll (collection-by-name collections "widgets")
+              model (first (:models coll))
+              png (io/file (.toString store-dir) "previews" (:id coll) (str (:id model) ".png"))
               first-modified (.lastModified png)]
           (is (.exists png))
           (Thread/sleep 1100)
@@ -86,16 +88,18 @@
               missing-path (.getAbsolutePath (.toFile (.resolve coll-dir "missing.stl")))
               store (test-store store-dir)
               coll-id (str (UUID/randomUUID))
+              model-id (str (UUID/randomUUID))
               collection {:id coll-id
                           :folder-path (.toString coll-dir)
                           :name "broken"
                           :tags []
-                          :models [{:path missing-path
+                          :models [{:id model-id
+                                    :path missing-path
                                     :filename "missing.stl"}]}
               _ (db/write-store! store "collections.edn" {coll-id collection})
               updated (preview/generate-previews! store)
               model (-> updated (get coll-id) :models first)
-              expected-png (io/file (.toString coll-dir) ".servo-images" "missing.stl.png")]
+              expected-png (io/file (.toString store-dir) "previews" coll-id (str model-id ".png"))]
           (is (nil? (:preview-path model)))
           (is (not (.exists expected-png))))
         (finally

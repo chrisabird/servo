@@ -5,6 +5,7 @@ RUN apt-get update && \
       f3d \
       libosmesa6 \
       libosmesa6-dev \
+      assimp-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

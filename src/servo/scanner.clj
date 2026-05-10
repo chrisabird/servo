@@ -19,13 +19,17 @@
   (and (.isFile f)
        (contains? model-extensions (file-extension f))))
 
-(defn- find-models [^File dir]
-  (->> (file-seq dir)
-       (filter model-file?)
-       (map (fn [^File f]
-              {:path (.getAbsolutePath f)
-               :filename (.getName f)}))
-       vec))
+(defn- find-models [^File dir model-ids]
+  (reduce
+    (fn [{:keys [models ids]} ^File f]
+      (let [path (.getAbsolutePath f)
+            id   (or (get ids path) (str (UUID/randomUUID)))]
+        {:models (conj models {:id id
+                               :path path
+                               :filename (.getName f)})
+         :ids    (assoc ids path id)}))
+    {:models [] :ids model-ids}
+    (filter model-file? (file-seq dir))))
 
 (defn- subdirs-to-depth
   "Returns a lazy seq of every descendant directory of `root`, up to `max-depth`
@@ -55,18 +59,20 @@
               [pname captures])))
         named-patterns))
 
-(defn- build-collection [existing-by-path ^File dir segments pattern-name captures]
+(defn- build-collection [existing-by-path model-ids ^File dir segments pattern-name captures]
   (let [folder-path   (.getAbsolutePath dir)
         existing      (get existing-by-path folder-path)
         derived       (cons pattern-name (pattern/derive-tags captures))
         existing-tags (or (:tags existing) [])
-        merged-tags   (vec (distinct (concat derived existing-tags)))]
-    {:id          (or (:id existing) (str (UUID/randomUUID)))
-     :folder-path folder-path
-     :name        (pattern/derive-name segments)
-     :tags        merged-tags
-     :models      (find-models dir)
-     :scanned-at  (Date.)}))
+        merged-tags   (vec (distinct (concat derived existing-tags)))
+        {:keys [models ids]} (find-models dir model-ids)]
+    {:collection {:id          (or (:id existing) (str (UUID/randomUUID)))
+                  :folder-path folder-path
+                  :name        (pattern/derive-name segments)
+                  :tags        merged-tags
+                  :models      models
+                  :scanned-at  (Date.)}
+     :model-ids  ids}))
 
 (defn scan-root! [root-path store & {:keys [on-progress] :or {on-progress (constantly nil)}}]
   (let [_ (on-progress {:message "Discovering collections..."})
@@ -80,12 +86,21 @@
             max-depth (apply max (map #(count (second %)) named-patterns))
             existing (db/read-store store "collections.edn" {})
             existing-by-path (into {} (map (juxt :folder-path identity)) (vals existing))
-            collections (->> (subdirs-to-depth root max-depth)
-                             (keep (fn [^File dir]
-                                     (let [segs (path-segments root dir)]
-                                       (when-let [[pname captures] (first-match named-patterns segs)]
-                                         (build-collection existing-by-path dir segs pname captures)))))
-                             (reduce (fn [acc c] (assoc acc (:id c) c)) {}))]
+            initial-model-ids (db/read-store store "model-ids.edn" {})
+            {:keys [collections model-ids]}
+            (->> (subdirs-to-depth root max-depth)
+                 (keep (fn [^File dir]
+                         (when-let [[pname captures] (first-match named-patterns (path-segments root dir))]
+                           [dir pname captures])))
+                 (reduce
+                   (fn [{:keys [collections model-ids]} [^File dir pname captures]]
+                     (let [segs (path-segments root dir)
+                           {:keys [collection model-ids]}
+                           (build-collection existing-by-path model-ids dir segs pname captures)]
+                       {:collections (assoc collections (:id collection) collection)
+                        :model-ids   model-ids}))
+                   {:collections {} :model-ids initial-model-ids}))]
         (db/write-store! store "collections.edn" collections)
+        (db/write-store! store "model-ids.edn" model-ids)
         (on-progress {:message (str "Found " (count collections) " collections, generating previews...")})
         (preview/generate-previews! store :on-progress on-progress)))))

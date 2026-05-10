@@ -220,3 +220,58 @@
         (finally
           (delete-tree! root)
           (delete-tree! store-dir))))))
+
+(defn- model-ids-by-filename [collections]
+  (->> collections
+       vals
+       (mapcat :models)
+       (map (juxt :filename :id))
+       (into {})))
+
+(deftest model-uuids-stable-across-rescans
+  (testing "rescanning the same dir yields identical model :id UUIDs"
+    (let [root (temp-dir "servo-scan-root-")
+          store-dir (temp-dir "servo-scan-store-")]
+      (try
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "things")
+              _ (mk-file dir-a "a.stl")
+              _ (mk-file dir-a "b.3mf")
+              first-scan (scanner/scan-root! (.toString root) store)
+              first-ids (model-ids-by-filename first-scan)
+              second-scan (scanner/scan-root! (.toString root) store)
+              second-ids (model-ids-by-filename second-scan)]
+          (is (every? some? (vals first-ids)))
+          (is (every? string? (vals first-ids)))
+          (is (= #{"a.stl" "b.3mf"} (set (keys first-ids))))
+          (is (= first-ids second-ids))
+          (let [persisted (db/read-store store "model-ids.edn" :missing)]
+            (is (map? persisted))
+            (is (= (set (vals first-ids)) (set (vals persisted))))))
+        (finally
+          (delete-tree! root)
+          (delete-tree! store-dir))))))
+
+(deftest new-model-gets-new-uuid-existing-preserved
+  (testing "adding a file yields a fresh UUID without disturbing existing ones"
+    (let [root (temp-dir "servo-scan-root-")
+          store-dir (temp-dir "servo-scan-store-")]
+      (try
+        (let [store (test-store store-dir)
+              _ (write-patterns! store [{:id "p1" :name "Top" :pattern "{name}"}])
+              dir-a (mk-subdir root "things")
+              _ (mk-file dir-a "a.stl")
+              first-scan (scanner/scan-root! (.toString root) store)
+              first-ids (model-ids-by-filename first-scan)
+              _ (mk-file dir-a "b.stl")
+              second-scan (scanner/scan-root! (.toString root) store)
+              second-ids (model-ids-by-filename second-scan)]
+          (is (= #{"a.stl"} (set (keys first-ids))))
+          (is (= #{"a.stl" "b.stl"} (set (keys second-ids))))
+          (is (= (get first-ids "a.stl") (get second-ids "a.stl")))
+          (is (some? (get second-ids "b.stl")))
+          (is (not= (get second-ids "a.stl") (get second-ids "b.stl"))))
+        (finally
+          (delete-tree! root)
+          (delete-tree! store-dir))))))

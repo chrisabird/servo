@@ -4,12 +4,12 @@
             [servo.db :as db]
             [taoensso.telemere :as log]))
 
-(defn- preview-path-for [folder-path filename]
-  (-> (io/file folder-path ".servo-images" (str filename ".png"))
+(defn- preview-path-for [store-dir collection-id model-id]
+  (-> (io/file store-dir "previews" collection-id (str model-id ".png"))
       .getAbsolutePath))
 
-(defn- ensure-preview-dir! [folder-path]
-  (.mkdirs (io/file folder-path ".servo-images")))
+(defn- ensure-preview-dir! [store-dir collection-id]
+  (.mkdirs (io/file store-dir "previews" collection-id)))
 
 (defn- f3d-args [output-path model-path]
   ["f3d" "--output" output-path model-path])
@@ -29,8 +29,8 @@
                    :data {:cmd args :exit exit :out out :err err :png-exists png-exists?}})
         nil))))
 
-(defn- process-model [folder-path {:keys [path filename] :as model}]
-  (let [output-path (preview-path-for folder-path filename)]
+(defn- process-model [store-dir collection-id {:keys [id path] :as model}]
+  (let [output-path (preview-path-for store-dir collection-id id)]
     (if (.exists (io/file output-path))
       (assoc model :preview-path output-path)
       (do
@@ -39,18 +39,20 @@
                    :data {:model path :output output-path}})
         (assoc model :preview-path (render-preview! path output-path))))))
 
-(defn- process-collection [{:keys [folder-path models] :as collection} on-each]
-  (ensure-preview-dir! folder-path)
-  (assoc collection :models (mapv #(on-each (process-model folder-path %) %) models)))
+(defn- process-collection [store-dir {:keys [id models] :as collection} on-each]
+  (ensure-preview-dir! store-dir id)
+  (assoc collection :models (mapv #(on-each (process-model store-dir id %) %) models)))
 
 (defn generate-previews! [store & {:keys [on-progress] :or {on-progress (constantly nil)}}]
-  (let [collections (db/read-store store "collections.edn" {})
+  (let [{:keys [dir]} store
+        collections (db/read-store store "collections.edn" {})
         total       (->> collections vals (mapcat :models) count)
         counter     (volatile! 0)
         updated     (update-vals
                      collections
                      (fn [{:keys [name] :as collection}]
                        (process-collection
+                        dir
                         collection
                         (fn [processed {:keys [filename]}]
                           (let [n (vswap! counter inc)]

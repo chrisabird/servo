@@ -7,9 +7,58 @@
             [ring.middleware.content-type :as content-type]
             [ring.middleware.params :as params]
             [ring.middleware.resource :as resource]
+            [servo.converter :as converter]
             [servo.db :as db]
             [servo.pattern :as pattern]
-            [servo.scan :as scan]))
+            [servo.scan :as scan])
+  (:import (java.io ByteArrayInputStream ByteArrayOutputStream)
+           (java.util.zip ZipEntry ZipOutputStream)))
+
+(def ^:private viewer-modal
+  [:div {:x-show                  "open"
+         "@click.self"            "close()"
+         "@keydown.escape.window" "close()"
+         :class                   "fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
+         :style                   "display: none"}
+   [:div {:class "bg-base-200 rounded-lg shadow-2xl w-full max-w-3xl flex flex-col"}
+    [:div {:class "flex items-center justify-between p-4 border-b border-base-300"}
+     [:span {:class "font-semibold truncate" :x-text "filename"}]
+     [:div {:class "flex items-center gap-2"}
+      [:a {:x-bind:href "downloadUrl"
+           :class       "btn btn-sm btn-outline"
+           :download    true}
+       "Download"]
+      [:button {:type    "button"
+                :class   "btn btn-ghost btn-sm"
+                "@click" "close()"}
+       "✕"]]]
+    [:template {:x-if "open"}
+     [:model-viewer {:x-bind:src      "glbUrl"
+                     :camera-controls ""
+                     :auto-rotate     ""
+                     :class           "w-full h-96 rounded-b-lg"
+                     :style           "background: #1a1a2e; --progress-bar-color: oklch(var(--p))"}]]]])
+
+(def ^:private viewer-script
+  "function viewer() {
+  return {
+    open: false,
+    glbUrl: '',
+    downloadUrl: '',
+    filename: '',
+    show(glbUrl, downloadUrl, filename) {
+      this.open = false;
+      this.glbUrl = glbUrl;
+      this.downloadUrl = downloadUrl;
+      this.filename = filename;
+      this.$nextTick(() => { this.open = true; });
+    },
+    close() {
+      this.open = false;
+      this.glbUrl = '';
+    }
+  }
+}")
 
 (defn- layout [title & body]
   (str
@@ -22,7 +71,9 @@
       [:title title]
       [:link {:rel "stylesheet" :href "/css/output.css"}]
       [:script {:src "https://unpkg.com/htmx.org@2.0.4" :defer true}]
-      [:script {:src "https://unpkg.com/alpinejs@3.14.7/dist/cdn.min.js" :defer true}]]
+      [:script {:src "https://unpkg.com/alpinejs@3.14.7/dist/cdn.min.js" :defer true}]
+      [:script {:type "module"
+                :src  "https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"}]]
      [:body {:class "min-h-screen bg-base-100 text-base-content"}
       [:nav {:class "navbar bg-base-200 border-b border-base-300 px-4"}
        [:div {:class "navbar-start"}
@@ -45,7 +96,8 @@
           [:path {:d "M3 22v-6h6"}]
           [:path {:d "M21 12a9 9 0 0 1-15 6.7L3 16"}]]
          "Scan"]]]
-      (into [:main {:class "container mx-auto p-8"}] body)]])))
+      (into [:main {:class "container mx-auto p-8"}] body)
+      [:script (h/raw viewer-script)]]])))
 
 (def ^:private placeholder-tile
   [:div {:class "bg-base-300 rounded flex items-center justify-center text-base-content/40 text-2xl"}
@@ -57,8 +109,9 @@
                       (take 4))
         slots    (concat
                   (for [m previews]
-                    [:img {:src   (str "/previews/" collection-id "/" (:filename m) ".png")
-                           :class "w-full h-full object-cover rounded"}])
+                    [:img {:src          (str "/previews/" collection-id "/" (:id m))
+                           :class        "w-full h-full object-cover rounded relative z-10 cursor-pointer"
+                           "@click.stop" (str "show('/models/" collection-id "/" (:id m) "/glb','/models/" collection-id "/" (:id m) "/download'," (json/write-value-as-string (:filename m)) ")")}])
                   (repeat (- 4 (count previews)) placeholder-tile))]
     (into [:div {:class "grid grid-cols-2 gap-1 aspect-square mb-3"}] slots)))
 
@@ -125,7 +178,11 @@
        :headers {"content-type" "text/html; charset=utf-8"}
        :body    (if htmx?
                   (str (h/html grid))
-                  (layout "servo" (search-bar q) grid))})))
+                  (layout "servo"
+                          (search-bar q)
+                          [:div {:x-data "viewer()"}
+                           grid
+                           viewer-modal]))})))
 
 (defn- health-handler [_]
   {:status  200
@@ -136,23 +193,54 @@
   {:status 404 :body "Not found"})
 
 (defn- preview-handler [db]
-  (fn [{{:keys [collection-id filename]} :path-params}]
+  (fn [{{:keys [collection-id model-id]} :path-params}]
+    (let [file (io/file (:dir db) "previews" collection-id (str model-id ".png"))]
+      (if (and (.exists file) (.isFile file) (.canRead file))
+        {:status  200
+         :headers {"content-type" "image/png"}
+         :body    file}
+        not-found))))
+
+(defn- glb-handler [db]
+  (fn [{{:keys [collection-id model-id]} :path-params}]
     (let [collections (db/read-store db "collections.edn" {})
-          folder      (some-> (get collections collection-id) :folder-path)]
-      (if-not folder
-        not-found
-        (let [images-dir (io/file folder ".servo-images")
-              file       (io/file images-dir filename)
-              dir-path   (str (.getCanonicalPath images-dir) java.io.File/separator)]
-          ;; canonicalise then prefix-check to reject path traversal via filename (e.g. "../../etc/passwd")
-          (if (and (.exists file)
-                   (.isFile file)
-                   (.canRead file)
-                   (.startsWith (.getCanonicalPath file) dir-path))
+          collection  (get collections collection-id)
+          model       (some #(when (= model-id (:id %)) %) (:models collection))]
+      (cond
+        (nil? collection) not-found
+        (nil? model)      not-found
+        :else
+        (if-let [path (converter/ensure-glb! db collection-id model-id (:path model))]
+          {:status  200
+           :headers {"content-type" "model/gltf-binary"}
+           :body    (io/file path)}
+          {:status 500 :body "Conversion failed"})))))
+
+(defn- download-handler [config db]
+  (fn [{{:keys [collection-id model-id]} :path-params}]
+    (let [collections (db/read-store db "collections.edn" {})
+          collection  (get collections collection-id)
+          model       (some #(when (= model-id (:id %)) %) (:models collection))]
+      (cond
+        (nil? collection) not-found
+        (nil? model)      not-found
+        :else
+        (let [model-file     (io/file (:path model))
+              stl-root       (io/file (:stl-root config))
+              model-canon    (.getCanonicalPath model-file)
+              stl-root-canon (.getCanonicalPath stl-root)]
+          (cond
+            (not (str/starts-with? model-canon (str stl-root-canon java.io.File/separator)))
+            {:status 403 :body "Forbidden"}
+
+            (not (.exists model-file))
+            not-found
+
+            :else
             {:status  200
-             :headers {"content-type" "image/png"}
-             :body    file}
-            not-found))))))
+             :headers {"content-type"        "application/octet-stream"
+                       "content-disposition" (str "attachment; filename=\"" (:filename model) "\"")}
+             :body    model-file}))))))
 
 (defn- collection-detail-region [id name-value tags]
   [:div {:id "detail-region"}
@@ -206,44 +294,55 @@
       });
     }
   }
-}
-function lightbox() {
-  return {
-    open: false,
-    photoUrl: '',
-    show(url) { this.photoUrl = url; this.open = true; },
-    close() { this.open = false; }
-  }
 }")
 
 (defn- model-tile [collection-id m]
-  (let [src (str "/previews/" collection-id "/" (:filename m) ".png")]
+  (let [src     (str "/previews/" collection-id "/" (:id m))
+        glb-url (str "/models/" collection-id "/" (:id m) "/glb")
+        dl-url  (str "/models/" collection-id "/" (:id m) "/download")]
     [:div {:class "flex flex-col items-center gap-1"}
      [:img {:src   src
             :class "rounded shadow w-full aspect-square object-cover cursor-pointer"
-            "@click" "show($event.target.src)"}]
-     [:span {:class "text-xs text-center truncate w-full"} (:filename m)]]))
+            "@click" (str "show('" glb-url "','" dl-url "'," (json/write-value-as-string (:filename m)) ")")}]
+     [:span {:class "text-xs text-center truncate w-full"} (:filename m)]
+     [:a {:href dl-url
+          :class "btn btn-ghost btn-xs"
+          :download true}
+      "Download"]]))
 
 (defn- model-grid [collection-id models]
   (into [:div {:class "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mt-6"}]
         (map #(model-tile collection-id %) models)))
 
-(def ^:private lightbox-overlay
-  [:div {:x-show                   "open"
-         "@click.self"             "close()"
-         "@keydown.escape.window"  "close()"
-         :class                    "fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
-         :style                    "display: none"}
-   [:img {:x-bind:src "photoUrl"
-          :class      "max-w-full max-h-full object-contain rounded shadow-2xl"}]])
+(defn- slugify [s]
+  (-> s
+      str/lower-case
+      (str/replace #"[^a-z0-9]+" "-")
+      (str/replace #"(?:^-|-$)" "")))
+
+(defn- models->zip-stream [models]
+  (let [baos (ByteArrayOutputStream.)
+        zos  (ZipOutputStream. baos)]
+    (doseq [{:keys [path filename]} models
+            :let [f (io/file path)]
+            :when (.exists f)]
+      (.putNextEntry zos (ZipEntry. ^String filename))
+      (io/copy f zos)
+      (.closeEntry zos))
+    (.finish zos)
+    (ByteArrayInputStream. (.toByteArray baos))))
 
 (defn- collection-detail-page [{:keys [id name tags models]}]
   (layout name
-          [:a {:href "/" :class "btn btn-ghost btn-sm mb-6"} "← Back"]
+          [:div {:class "flex items-center gap-3 mb-6"}
+           [:a {:href "/" :class "btn btn-ghost btn-sm"} "← Back"]
+           [:a {:href (str "/collections/" id "/download")
+                :class "btn btn-outline btn-sm"}
+            "Download all"]]
           (collection-detail-region id name tags)
-          [:div {:x-data "lightbox()"}
+          [:div {:x-data "viewer()"}
            (model-grid id models)
-           lightbox-overlay]
+           viewer-modal]
           [:script (h/raw tag-editor-script)]))
 
 (defn- collection-detail-handler [db]
@@ -253,6 +352,16 @@ function lightbox() {
         {:status  200
          :headers {"content-type" "text/html; charset=utf-8"}
          :body    (collection-detail-page collection)}
+        not-found))))
+
+(defn- collection-download-handler [db]
+  (fn [{{:keys [id]} :path-params}]
+    (let [collections (db/read-store db "collections.edn" {})]
+      (if-let [{:keys [name models]} (get collections id)]
+        {:status  200
+         :headers {"content-type"        "application/zip"
+                   "content-disposition" (str "attachment; filename=\"" (slugify name) ".zip\"")}
+         :body    (models->zip-stream models)}
         not-found))))
 
 (defn- form-tags [form-params]
@@ -473,8 +582,11 @@ function lightbox() {
    ["/patterns/:id/delete"               {:post (patterns-delete-handler db)}]
    ["/collections/:id"                   {:get   (collection-detail-handler db)
                                           :patch (collection-patch-handler db)}]
+   ["/collections/:id/download"          {:get   (collection-download-handler db)}]
    ["/tags/autocomplete"                 {:get   (tags-autocomplete-handler db)}]
-   ["/previews/:collection-id/:filename" {:get   (preview-handler db)}]])
+   ["/previews/:collection-id/:model-id"  {:get   (preview-handler db)}]
+   ["/models/:collection-id/:model-id/glb" {:get   (glb-handler db)}]
+   ["/models/:collection-id/:model-id/download" {:get (download-handler config db)}]])
 
 (defn- build-handler [config db]
   (-> (ring/ring-handler
